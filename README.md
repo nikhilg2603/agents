@@ -31,7 +31,7 @@ Follow these steps to set up the project environment.
 
 1.  **Clone the repository:**
     ```bash
-    git clone [git@github.com:nikhilg2603/agents.git](git@github.com:nikhilg2603/agents.git)
+    git clone git@github.com:nikhilg2603/agents.git
     cd agents
     ```
 
@@ -57,7 +57,7 @@ Follow these steps to set up the project environment.
     ```bash
     uv sync
     ```
-    
+
     ```bash
     # For macOS/Linux
     source .venv/bin/activate
