@@ -1,11 +1,11 @@
+# src/agent.py
 import logging
-import os  # Added os for environment variables
-import re  # Added re for punctuation stripping
+import os
+import re
 import asyncio
 
 from dotenv import load_dotenv
 
-# --- MODIFIED IMPORTS ---
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -13,23 +13,24 @@ from livekit.agents import (
     JobProcess,
     MetricsCollectedEvent,
     RoomInputOptions,
+    RoomOutputOptions,
     WorkerOptions,
     cli,
     inference,
     metrics,
-    function_tool,  # Added function_tool
-    RunContext,       # Added RunContext
+    function_tool,  # We still keep this for other tools
+    RunContext,
 )
 from livekit.plugins import noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-# --- NEW MODULAR IMPORT ---
+# --- MODULAR IMPORT ---
 import interruption_handler
 
 logger = logging.getLogger("agent")
 
-# --- MOVED FROM OLD HANDLER ---
-PUNCTUATION = re.compile(r"[,\.?!]")
+# We don't need the PUNCTUATION regex anymore,
+# the LLM is smart enough to handle it.
 
 load_dotenv(".env.local")
 
@@ -43,30 +44,57 @@ class Assistant(Agent):
             You are curious, friendly, and have a sense of humor.""",
         )
         
-        # This state is owned by the agent
-        self.ignored_words = {
-            "uh", "umm", "hmm",  # English
-            "haan", "acha", "theek hai"  # Hindi
-        }
-        logger.info(f"Initialized with ignored words: {self.ignored_words}")
+        # --- MODIFIED: Agent has its own LLM for internal logic ---
+        # This is separate from the main chat LLM and is used
+        # only for our filler-word check.
+        try:
+            self.filler_llm = inference.LLM(model="openai/gpt-4o-mini")
+            logger.info("Filler-check LLM initialized (gpt-4o-mini).")
+        except Exception as e:
+            logger.error(f"Failed to initialize filler-check LLM: {e}")
+            logger.error("The agent will NOT be able to ignore fillers.")
+            self.filler_llm = None
+            
+        self.filler_check_prompt = (
+            "You are an expert linguistic classifier. The user has said something "
+            "while an agent was speaking. Your task is to determine if this speech "
+            "is *only* a filler phrase (like 'umm', 'euh', 'haan', 'like', 'you know', etc.) "
+            "and contains no substantive content, command, or question. "
+            "Answer with a single word: YES or NO.\n\n"
+            "Speech: \"{text}\"\n"
+            "Classification:"
+        )
 
-    # This method is called by the interruption_handler
-    def _is_only_fillers(self, text: str) -> bool:
-        """Checks if the text contains only ignored filler words."""
-        normalized_text = PUNCTUATION.sub("", text.lower())
-        words = [word for word in normalized_text.split() if word]
-        return len(words) > 0 and all(w in self.ignored_words for w in words)
 
-    # This tool remains on the agent
-    @function_tool
-    async def update_ignored_words(self, context: RunContext, words: list[str]):
+    # --- MODIFIED: This method is now async and uses an LLM ---
+    async def _is_only_fillers(self, text: str) -> bool:
         """
-        Use this tool to update the list of filler words that the agent
-        should ignore when it is speaking.
+        Uses an LLM to dynamically classify if a text is
+        only a filler phrase in any language.
         """
-        self.ignored_words = set(w.lower().strip() for w in words)
-        logger.info(f"Updated ignored words to: {self.ignored_words}")
-        return f"Ignored words have been updated to: {self.ignored_words}"
+        if not self.filler_llm:
+            logger.warning("No filler-check LLM available. Defaulting to NOT filler.")
+            return False # Fail safe: if LLM is broken, allow interruptions
+            
+        prompt = self.filler_check_prompt.format(text=text)
+        
+        try:
+            # Create a new, isolated chat session for this check
+            chat = self.filler_llm.chat()
+            resp = await chat.a_send_message(prompt)
+            answer = await resp.a_text()
+            
+            answer = answer.strip().upper()
+            logger.info(f"Filler check for '{text}': LLM answered '{answer}'")
+            return answer == "YES"
+        except Exception as e:
+            logger.error(f"Filler check LLM call failed: {e}")
+            return False # Fail safe: allow interruption if check fails
+
+    # --- REMOVED ---
+    # The add/remove/set tools are no longer needed
+    # as the LLM handles all languages automatically.
+    # You can still add other, unrelated tools here (like `lookup_weather`).
 
 
 def prewarm(proc: JobProcess):
@@ -82,23 +110,20 @@ async def entrypoint(ctx: JobContext):
     agent = Assistant()
 
     session = AgentSession(
-        # --- MODIFIED FOR BONUS 2 (MULTI-LANGUAGE) ---
+        # STT (Multi-language)
         stt=inference.STT(model="assemblyai/universal-streaming"),
         
+        # Main Chat LLM
         llm=inference.LLM(model="openai/gpt-4o-mini"),
         
-        tts=inference.TTS(
-            model="cartesia/sonic-3", voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
-        ),
+        # TTS (Multi-language)
+        tts=inference.TTS(model="cartesia/sonic-3"),
         
-        # --- MODIFIED: REMOVED DEFAULT LOGIC ---
-        # We removed turn_detection and vad to let our
-        # custom handler take full control of interruptions.
-        
+        # Removed turn_detection and vad
         preemptive_generation=True,
     )
 
-    # ... (rest of your metrics and shutdown code) ...
+    # --- METRICS AND USAGE (Unchanged) ---
     usage_collector = metrics.UsageCollector()
 
     @session.on("metrics_collected")
@@ -111,6 +136,7 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"Usage: {summary}")
 
     ctx.add_shutdown_callback(log_usage)
+    # --- END METRICS ---
 
     await session.start(
         agent=agent,
@@ -120,7 +146,7 @@ async def entrypoint(ctx: JobContext):
         ),
     )
 
-    # --- ALL HANDLER LOGIC IS REPLACED BY THIS ONE LINE ---
+    # --- Register our modular handler ---
     interruption_handler.register_interruption_handler(session, agent)
 
     # Join the room and connect to the user

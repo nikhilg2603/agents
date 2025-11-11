@@ -1,142 +1,161 @@
-<a href="https://livekit.io/">
-  <img src="./.github/assets/livekit-mark.png" alt="LiveKit logo" width="100" height="100">
-</a>
+# LiveKit Agent with AI-Powered Interruption Handling
 
-# LiveKit Agents Starter - Python
+This project implements an advanced, conversational AI agent using the LiveKit Agents framework. It solves the common "filler word" problem by intelligently deciding when to ignore user speech (like "uh" or "umm") and when to accept a real interruption.
 
-A complete starter project for building voice AI apps with [LiveKit Agents for Python](https://github.com/livekit/agents) and [LiveKit Cloud](https://cloud.livekit.io/).
+This solution is designed to be language-aware by using a configurable list of filler words.
 
-The starter project includes:
+## Core Features
 
-- A simple voice AI assistant, ready for extension and customization
-- A voice AI pipeline with [models](https://docs.livekit.io/agents/models) from OpenAI, Cartesia, and AssemblyAI served through LiveKit Cloud
-  - Easily integrate your preferred [LLM](https://docs.livekit.io/agents/models/llm/), [STT](https://docs.livekit.io/agents/models/stt/), and [TTS](https://docs.livekit.io/agents/models/tts/) instead, or swap to a realtime model like the [OpenAI Realtime API](https://docs.livekit.io/agents/models/realtime/openai)
-- Eval suite based on the LiveKit Agents [testing & evaluation framework](https://docs.livekit.io/agents/build/testing/)
-- [LiveKit Turn Detector](https://docs.livekit.io/agents/build/turns/turn-detector/) for contextually-aware speaker detection, with multilingual support
-- [Background voice cancellation](https://docs.livekit.io/home/cloud/noise-cancellation/)
-- Integrated [metrics and logging](https://docs.livekit.io/agents/build/metrics/)
-- A Dockerfile ready for [production deployment](https://docs.livekit.io/agents/ops/deployment/)
+This agent successfully implements all objectives from the SalesCode.ai Challenge:
 
-This starter app is compatible with any [custom web/mobile frontend](https://docs.livekit.io/agents/start/frontend/) or [SIP-based telephony](https://docs.livekit.io/agents/start/telephony/).
+* **Smart Interruption:** The agent correctly ignores filler words from a defined list ("uh", "umm", "haan", etc.) when it is speaking, allowing it to complete its thought.
+* **Real-Time Responsiveness:** The agent stops *immediately* if it detects genuine user speech ("wait", "stop that", "no not that one") while it is talking.
+* **Context-Aware:** The *same* filler words ("umm" or "haan") are registered as valid input when the agent is quiet, allowing the user to start a thought naturally.
+* **Modular Design:** All interruption logic is cleanly separated into `src/interruption_handler.py` for maintainability. The main `src/agent.py` file only defines the agent's "personality" and logic.
+* **Dynamic Filler List (Bonus):** The agent includes tools (`add_ignored_words`, `remove_ignored_words`) that allow the user to dynamically update the filler word list in real-time during the conversation.
+* **Multi-Language Support (Bonus):** The default filler list includes words from English and Hindi. The agent's tools allow for adding fillers from any language at runtime.
 
-## Coding agents and MCP
+---
 
-This project is designed to work with coding agents like [Cursor](https://www.cursor.com/) and [Claude Code](https://www.anthropic.com/claude-code). 
+## Setup and Installation
 
-To get the most out of these tools, install the [LiveKit Docs MCP server](https://docs.livekit.io/mcp).
+Follow these steps to set up the project environment.
 
-For Cursor, use this link:
+### 1. Prerequisites
+* Python 3.10+
+* `uv` (a fast Python package manager)
+* An OpenAI API key **with billing enabled**.
+* A Google AI Studio (Gemini) API key (this is free).
 
-[![Install MCP Server](https://cursor.com/deeplink/mcp-install-light.svg)](https://cursor.com/en-US/install-mcp?name=livekit-docs&config=eyJ1cmwiOiJodHRwczovL2RvY3MubGl2ZWtpdC5pby9tY3AifQ%3D%3D)
+### 2. Environment Setup
 
-For Claude Code, run this command:
+1.  **Clone the repository:**
+    ```bash
+    git clone [git@github.com:nikhilg2603/agents.git](git@github.com:nikhilg2603/agents.git)
+    cd agents
+    ```
+
+2.  **Create and activate a virtual environment:**
+    ```bash
+    # For macOS/Linux
+    python3 -m venv venv
+    source venv/bin/activate
+
+    # For Windows
+    python -m venv venv
+    .\venv\Scripts\activate
+    ```
+
+3.  **Install `uv` (if you don't have it):**
+    `uv` is a very fast replacement for `pip`.
+    ```bash
+    pip install uv
+    ```
+
+4.  **Install dependencies using `uv`:**
+    This reads the `requirements.txt` file and installs all packages.
+    ```bash
+    uv sync
+    ```
+
+5.  **Install Audio System Dependencies (Linux Only):**
+    If you are on Ubuntu/Debian, the `console` mode requires the PortAudio library to access your microphone.
+    ```bash
+    sudo apt-get update && sudo apt-get install portaudio19-dev
+    ```
+
+6.  **Download VAD Models:**
+    The agent requires local models for Voice Activity Detection. Run this command once to download them.
+    ```bash
+    python src/agent.py download-files
+    ```
+
+---
+
+## Configuration (API Keys)
+
+This project is set up to run in `console` mode and requires you to **hardcode your API keys** directly into the main agent file.
+
+1.  **Open the main agent file:**
+    Open `src/agent.py`.
+
+2.  **Add your API Keys:**
+    Paste your keys into the `.env.local` file. **You must have billing enabled on your OpenAI account** for this agent to work, as it's used for both the main chat and the internal filler-detection.
+
+    ```ini
+    # --- LiveKit Project Keys ---
+    # (From your LiveKit project settings)
+    LIVEKIT_URL=
+    LIVEKIT_API_KEY=
+    LIVEKIT_API_SECRET=
+
+    ```
+
+
+    **CRITICAL:** The OpenAI API for STT and TTS is a **paid service**. Your agent will fail with a `429 insufficient_quota` error until you have **enabled billing and added credits** to your OpenAI account. The Google Gemini key is free.
+
+---
+
+## Running the Agent
+
+This agent is configured to run in `console` mode, which uses your local terminal's microphone and speakers.
+
+1.  **Ensure your API keys are in `src/agent.py`** and your `venv` is active.
+
+2.  **Run the agent in `console` mode:**
+    ```bash
+    python src/agent.py console
+    ```
+
+3.  **Wait for Connection:**
+    If successful, you will see logs and then:
+    ```
+    ==================================================
+         Livekit Agents - Console
+    ==================================================
+    Press [Ctrl+B] to toggle between Text/Audio mode, [Q] to quit.
+    ```
+    Your agent is now running and listening through your microphone.
+
+---
+
+## How to Test
+
+Once the agent is running in `console` mode, you can test the logic by speaking into your microphone.
+
+### Test Scenarios
+
+* **Test 1: Filler While Agent Speaks**
+    * **Action:** Ask the agent a question ("What's the capital of France?"). While it is replying ("The capital of France is..."), say "umm..." or "haan...".
+    * **Expected:** The agent will *ignore* your filler and continue speaking. Your log will show "Ignored filler...".
+
+* **Test 2: Real Interruption**
+    * **Action:** Ask the agent a long question ("Tell me about the history of the Eiffel Tower"). While it is speaking, say "wait, stop, tell me about the Louvre instead."
+    * **Expected:** The agent will *stop speaking immediately* and begin responding to your new query.
+
+* **Test 3: Filler While Agent is Quiet**
+    * **Action:** When the agent is quiet, start your sentence with a filler. "Umm... what time is it?"
+    * **Expected:** The agent will *hear* the entire phrase, including "Umm," and process it as valid input.
+
+* **Test 4: Dynamic List (Bonus)**
+    * **Action:** Say "add 'like' to the ignored words list."
+    * **Expected:** The agent will confirm the word "like" has been added.
+    * **Action:** Ask a question. While the agent speaks, say "like...".
+    * **Expected:** The agent will now ignore "like" and continue speaking.
+
+---
+
+## Project Structure
 
 ```
-claude mcp add --transport http livekit-docs https://docs.livekit.io/mcp
+.
+├── .env.local          # Not used by console mode, but good practice
+├── requirements.txt    # Python dependencies (used by 'uv sync')
+└── src/
+    ├── __init__.py     # Makes 'src' a Python package
+    ├── agent.py        # Main file. Defines the Assistant class,
+    │                   # its personality, API keys, and
+    │                   # filler-word management tools.
+    └── interruption_handler.py # Modular logic for handling transcriptions
+                                # and deciding when to interrupt.
 ```
-
-For Codex CLI, use this command to install the server:
-```
-codex mcp add --url https://docs.livekit.io/mcp livekit-docs
-```
-
-For Gemini CLI, use this command to install the server:
-```
-gemini mcp add --transport http livekit-docs https://docs.livekit.io/mcp
-```
-
-The project includes a complete [AGENTS.md](AGENTS.md) file for these assistants. You can modify this file  your needs. To learn more about this file, see [https://agents.md](https://agents.md).
-
-## Dev Setup
-
-Clone the repository and install dependencies to a virtual environment:
-
-```console
-cd agent-starter-python
-uv sync
-```
-
-Sign up for [LiveKit Cloud](https://cloud.livekit.io/) then set up the environment by copying `.env.example` to `.env.local` and filling in the required keys:
-
-- `LIVEKIT_URL`
-- `LIVEKIT_API_KEY`
-- `LIVEKIT_API_SECRET`
-
-You can load the LiveKit environment automatically using the [LiveKit CLI](https://docs.livekit.io/home/cli/cli-setup):
-
-```bash
-lk cloud auth
-lk app env -w -d .env.local
-```
-
-## Run the agent
-
-Before your first run, you must download certain models such as [Silero VAD](https://docs.livekit.io/agents/build/turns/vad/) and the [LiveKit turn detector](https://docs.livekit.io/agents/build/turns/turn-detector/):
-
-```console
-uv run python src/agent.py download-files
-```
-
-Next, run this command to speak to your agent directly in your terminal:
-
-```console
-uv run python src/agent.py console
-```
-
-To run the agent for use with a frontend or telephony, use the `dev` command:
-
-```console
-uv run python src/agent.py dev
-```
-
-In production, use the `start` command:
-
-```console
-uv run python src/agent.py start
-```
-
-## Frontend & Telephony
-
-Get started quickly with our pre-built frontend starter apps, or add telephony support:
-
-| Platform | Link | Description |
-|----------|----------|-------------|
-| **Web** | [`livekit-examples/agent-starter-react`](https://github.com/livekit-examples/agent-starter-react) | Web voice AI assistant with React & Next.js |
-| **iOS/macOS** | [`livekit-examples/agent-starter-swift`](https://github.com/livekit-examples/agent-starter-swift) | Native iOS, macOS, and visionOS voice AI assistant |
-| **Flutter** | [`livekit-examples/agent-starter-flutter`](https://github.com/livekit-examples/agent-starter-flutter) | Cross-platform voice AI assistant app |
-| **React Native** | [`livekit-examples/voice-assistant-react-native`](https://github.com/livekit-examples/voice-assistant-react-native) | Native mobile app with React Native & Expo |
-| **Android** | [`livekit-examples/agent-starter-android`](https://github.com/livekit-examples/agent-starter-android) | Native Android app with Kotlin & Jetpack Compose |
-| **Web Embed** | [`livekit-examples/agent-starter-embed`](https://github.com/livekit-examples/agent-starter-embed) | Voice AI widget for any website |
-| **Telephony** | [📚 Documentation](https://docs.livekit.io/agents/start/telephony/) | Add inbound or outbound calling to your agent |
-
-For advanced customization, see the [complete frontend guide](https://docs.livekit.io/agents/start/frontend/).
-
-## Tests and evals
-
-This project includes a complete suite of evals, based on the LiveKit Agents [testing & evaluation framework](https://docs.livekit.io/agents/build/testing/). To run them, use `pytest`.
-
-```console
-uv run pytest
-```
-
-## Using this template repo for your own project
-
-Once you've started your own project based on this repo, you should:
-
-1. **Check in your `uv.lock`**: This file is currently untracked for the template, but you should commit it to your repository for reproducible builds and proper configuration management. (The same applies to `livekit.toml`, if you run your agents in LiveKit Cloud)
-
-2. **Remove the git tracking test**: Delete the "Check files not tracked in git" step from `.github/workflows/tests.yml` since you'll now want this file to be tracked. These are just there for development purposes in the template repo itself.
-
-3. **Add your own repository secrets**: You must [add secrets](https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-what-your-workflow-does/using-secrets-in-github-actions) for `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` so that the tests can run in CI.
-
-## Deploying to production
-
-This project is production-ready and includes a working `Dockerfile`. To deploy it to LiveKit Cloud or another environment, see the [deploying to production](https://docs.livekit.io/agents/ops/deployment/) guide.
-
-## Self-hosted LiveKit
-
-You can also self-host LiveKit instead of using LiveKit Cloud. See the [self-hosting](https://docs.livekit.io/home/self-hosting/) guide for more information. If you choose to self-host, you'll need to also use [model plugins](https://docs.livekit.io/agents/models/#plugins) instead of LiveKit Inference and will need to remove the [LiveKit Cloud noise cancellation](https://docs.livekit.io/home/cloud/noise-cancellation/) plugin.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
