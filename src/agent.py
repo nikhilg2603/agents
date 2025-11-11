@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import asyncio
+from typing import Set
 
 from dotenv import load_dotenv
 
@@ -18,83 +19,99 @@ from livekit.agents import (
     cli,
     inference,
     metrics,
-    function_tool,  # We still keep this for other tools
+    function_tool,  # <-- We MUST have this for the bonus task
     RunContext,
 )
 from livekit.plugins import noise_cancellation, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 # --- MODULAR IMPORT ---
 import interruption_handler
 
 logger = logging.getLogger("agent")
 
-# We don't need the PUNCTUATION regex anymore,
-# the LLM is smart enough to handle it.
+# We use a simple regex to strip punctuation
+PUNCTUATION_REGEX = re.compile(r"[^\w\s]")
 
 load_dotenv(".env.local")
 
 
+# src/agent.py (Corrected Assistant Class)
+
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
-            instructions="""You are a helpful voice AI assistant. The user is interacting with you via voice, even if you perceive the conversation as text.
-            You eagerly assist users with their questions by providing information from your extensive knowledge.
-            Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
-            You are curious, friendly, and have a sense of humor.""",
+            instructions="""You are a helpful voice AI assistant. The user is interacting with you via voice.
+            Your responses are concise and to the point.
+            You have tools to manage a list of 'ignored words'.
+            When the user asks you to add, remove, or list these words,
+            use your tools and then confirm the action was successful.
+            For example: 'Okay, I've added 'haan' to the ignored list.'""",
         )
         
-        # --- MODIFIED: Agent has its own LLM for internal logic ---
-        # This is separate from the main chat LLM and is used
-        # only for our filler-word check.
         try:
-            self.filler_llm = inference.LLM(model="openai/gpt-4o-mini")
-            logger.info("Filler-check LLM initialized (gpt-4o-mini).")
+            ignored_words_str = os.environ.get("IGNORED_WORDS", "uh,umm,hmm,haan,okay")
+            self.ignored_words: Set[str] = set(ignored_words_str.split(','))
+            logger.info(f"Initialized with ignored_words: {self.ignored_words}")
         except Exception as e:
-            logger.error(f"Failed to initialize filler-check LLM: {e}")
-            logger.error("The agent will NOT be able to ignore fillers.")
-            self.filler_llm = None
-            
-        self.filler_check_prompt = (
-            "You are an expert linguistic classifier. The user has said something "
-            "while an agent was speaking. Your task is to determine if this speech "
-            "is *only* a filler phrase (like 'umm', 'euh', 'haan', 'like', 'you know', etc.) "
-            "and contains no substantive content, command, or question. "
-            "Answer with a single word: YES or NO.\n\n"
-            "Speech: \"{text}\"\n"
-            "Classification:"
-        )
+            logger.error(f"Failed to initialize ignored_words: {e}")
+            self.ignored_words = set()
 
-
-    # --- MODIFIED: This method is now async and uses an LLM ---
-    async def _is_only_fillers(self, text: str) -> bool:
+    def _is_only_fillers(self, text: str) -> bool:
         """
-        Uses an LLM to dynamically classify if a text is
-        only a filler phrase in any language.
+        Checks if the transcribed text contains ONLY filler words
+        from the configurable self.ignored_words set.
         """
-        if not self.filler_llm:
-            logger.warning("No filler-check LLM available. Defaulting to NOT filler.")
-            return False # Fail safe: if LLM is broken, allow interruptions
+        normalized_text = text.lower().strip()
+        normalized_text = PUNCTUATION_REGEX.sub("", normalized_text)
+        words = normalized_text.split()
+        if not words:
+            return False
             
-        prompt = self.filler_check_prompt.format(text=text)
+        is_filler = all(word in self.ignored_words for word in words)
         
-        try:
-            # Create a new, isolated chat session for this check
-            chat = self.filler_llm.chat()
-            resp = await chat.a_send_message(prompt)
-            answer = await resp.a_text()
+        if is_filler:
+            logger.debug(f"Classified '{text}' as filler.")
+        else:
+            logger.debug(f"Classified '{text}' as non-filler.")
             
-            answer = answer.strip().upper()
-            logger.info(f"Filler check for '{text}': LLM answered '{answer}'")
-            return answer == "YES"
-        except Exception as e:
-            logger.error(f"Filler check LLM call failed: {e}")
-            return False # Fail safe: allow interruption if check fails
+        return is_filler
 
-    # --- REMOVED ---
-    # The add/remove/set tools are no longer needed
-    # as the LLM handles all languages automatically.
-    # You can still add other, unrelated tools here (like `lookup_weather`).
+    # --- MODIFIED: Changed to 'async def' ---
+    @function_tool
+    async def add_ignored_word(self, word: str):
+        """Adds a new filler word to the dynamic ignored list."""
+        word_lower = word.lower().strip()
+        if not word_lower:
+            return "Cannot add an empty word."
+            
+        self.ignored_words.add(word_lower)
+        logger.info(f"Dynamically added '{word_lower}' to ignored_words. New set: {self.ignored_words}")
+        return f"Okay, I will now ignore '{word_lower}' when I am speaking."
+
+    # --- MODIFIED: Changed to 'async def' ---
+    @function_tool
+    async def remove_ignored_word(self, word: str):
+        """Removes a filler word from the dynamic ignored list."""
+        word_lower = word.lower().strip()
+        if word_lower in self.ignored_words:
+            self.ignored_words.remove(word_lower)
+            logger.info(f"Dynamically removed '{word_lower}' from ignored_words. New set: {self.ignored_words}")
+            return f"Removed '{word_lower}'. I will no longer ignore it."
+        else:
+            return f"The word '{word_lower}' was not in the list."
+
+    # --- MODIFIED: Changed to 'async def' ---
+    @function_tool
+    async def list_ignored_words(self):
+        """Lists all words currently in the ignored list."""
+        if not self.ignored_words:
+            return "The ignored list is currently empty."
+        
+        word_list = ", ".join(sorted(list(self.ignored_words)))
+        logger.info(f"Listing ignored words: {word_list}")
+        return f"The current ignored words are: {word_list}"
+    
+    
 
 
 def prewarm(proc: JobProcess):
@@ -119,7 +136,6 @@ async def entrypoint(ctx: JobContext):
         # TTS (Multi-language)
         tts=inference.TTS(model="cartesia/sonic-3"),
         
-        # Removed turn_detection and vad
         preemptive_generation=True,
     )
 
@@ -147,6 +163,7 @@ async def entrypoint(ctx: JobContext):
     )
 
     # --- Register our modular handler ---
+    # This part of your code was correct
     interruption_handler.register_interruption_handler(session, agent)
 
     # Join the room and connect to the user

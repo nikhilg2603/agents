@@ -57,6 +57,14 @@ Follow these steps to set up the project environment.
     ```bash
     uv sync
     ```
+    
+    ```bash
+    # For macOS/Linux
+    source .venv/bin/activate
+
+    # For Windows
+    .venv\Scripts\activate
+    ```
 
 5.  **Install Audio System Dependencies (Linux Only):**
     If you are on Ubuntu/Debian, the `console` mode requires the PortAudio library to access your microphone.
